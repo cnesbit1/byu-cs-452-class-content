@@ -1,0 +1,17 @@
+# Core scraping + parsing
+requests>=2.32.0
+urllib3>=2.2.0
+beautifulsoup4>=4.12.3
+
+# Data handling
+pandas>=2.2.2
+numpy>=1.26.4
+
+# Embeddings (OpenAI + local)
+openai>=1.30.0
+tiktoken>=0.7.0
+sentence-transformers>=3.0.0
+torch>=2.2.0
+
+# ML utilities (clustering, cosine similarity)
+scikit-learn>=1.4.0
