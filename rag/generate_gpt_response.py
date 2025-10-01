@@ -5,13 +5,13 @@ from openai import OpenAI
 
 MODEL = "gpt-4o"
 
-def load_hits(csv_path, question):
+def load_content(csv_path, question):
     df = pd.read_csv(csv_path)
     hits = df[df["question"] == question].sort_values("score", ascending=False).head(3)
-    ctx = []
-    for _, r in hits.iterrows():
-        ctx.append(f"Title: {r['title']} ({r['season']} {r['year']}) — {r['speaker']}\nURL: {r['url']}\nExcerpt: {r['snippet']}")
-    return "\n\n---\n\n".join(ctx)
+    context = []
+    for _, row in hits.iterrows():
+        context.append(f"Title: {row['title']} ({row['season']} {row['year']}) — {row['speaker']}\nURL: {row['url']}\nExcerpt: {row['snippet']}")
+    return "\n\n---\n\n".join(context)
 
 def ask_gpt(question, context):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -52,8 +52,9 @@ def main():
 
     for question in questions:
         print(f"\n=== {question} ===")
-        ctx = load_hits(csv_path, question)
-        print(ask_gpt(question, ctx))
+        ctx = load_content(csv_path, question)
+        response = ask_gpt(question, ctx)
+        print(response)
 
 if __name__ == "__main__":
     main()

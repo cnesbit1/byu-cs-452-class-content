@@ -1,41 +1,28 @@
-# run_all_retrievals.py
 import os, ast, json
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
-# query embedding backends
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 
-# -----------------------------
-# Utils
-# -----------------------------
 def parse_vec(x):
-    """CSV stores a Python list as a string; parse to np.array"""
     return np.array(ast.literal_eval(x), dtype=np.float32)
 
 def l2norm(v):
     n = np.linalg.norm(v, axis=-1, keepdims=True) + 1e-12
     return v / n
 
-def cos_sim_matrix(q, M):
-    # q: (d,), M: (N, d) -> (N,)
-    return M @ q
-
 def load_df(path, expect_cluster=False):
     df = pd.read_csv(path)
     if "embedding" not in df.columns:
         raise FileNotFoundError(f"'embedding' column missing in {path}")
 
-    # parse embeddings and normalize
     df["embedding"] = df["embedding"].apply(parse_vec)
     E = np.stack(df["embedding"].to_list())
     E = l2norm(E)
     df["embedding_norm"] = list(E)
 
     if expect_cluster:
-        # clusters store a list of 3 rep paragraphs in 'text' as a string
         def parse_text_list(t):
             try:
                 v = ast.literal_eval(str(t))
@@ -47,20 +34,20 @@ def load_df(path, expect_cluster=False):
         df["text_list"] = df["text"].apply(parse_text_list) if "text" in df.columns else [[]]*len(df)
     return df
 
-# -----------------------------
-# Query embedding functions
-# -----------------------------
-_free_model = None
+free_model = None
 def embed_query_free(q: str) -> np.ndarray:
-    """SentenceTransformer embedding (normalized)"""
-    global _free_model
-    if _free_model is None:
-        _free_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-    v = _free_model.encode([q], normalize_embeddings=True)[0]
+    global free_model
+    if free_model is None:
+        free_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    v = free_model.encode([q],
+        normalize_embeddings=True,
+        batch_size=32,
+        show_progress_bar=True,
+        convert_to_numpy=True,
+    )[0]
     return v.astype(np.float32)
 
 def embed_query_openai(q: str) -> np.ndarray:
-    """OpenAI embedding (normalized so cosine is dot)"""
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not set (env var or config.json).")
@@ -70,7 +57,13 @@ def embed_query_openai(q: str) -> np.ndarray:
     return l2norm(v)
 
 def embed_query(q: str, kind: str) -> np.ndarray:
-    return embed_query_free(q) if kind == "free" else embed_query_openai(q)
+    if kind == "free":
+        return embed_query_free(q)
+    if kind == "openai":
+        return embed_query_openai(q)
+    raise ValueError(f"Unknown embedding kind: {kind}")
+
+def cos_sim_matrix(q, M): return M @ q
 
 def retrieve_full(df_full: pd.DataFrame, qvec: np.ndarray, topk=3) -> pd.DataFrame:
     M = np.stack(df_full["embedding_norm"].to_list())
@@ -78,7 +71,7 @@ def retrieve_full(df_full: pd.DataFrame, qvec: np.ndarray, topk=3) -> pd.DataFra
     idx = np.argsort(-sims)[:topk]
     out = df_full.iloc[idx].copy()
     out["score"] = sims[idx]
-    # nice short snippet if available
+
     if "text" in out.columns:
         out["snippet"] = out["text"].astype(str).str.replace(r"\s+", " ", regex=True)
     else:
@@ -204,7 +197,6 @@ def main():
                 else:
                     hits = retrieve_cluster(df, qvec, topk=3)
 
-                # standardize columns
                 for _, r in hits.iterrows():
                     combined_rows.append({
                         "question": question,
@@ -220,7 +212,6 @@ def main():
                         "snippet": r.get("snippet",""),
                     })
 
-                # also write per-combo file
                 out_csv = os.path.join(full_results_path, f"{kind}_{mode}_top3.csv")
                 small = pd.DataFrame([row for row in combined_rows if row["model"]==kind and row["mode"]==mode and row["question"]==question])
                 if not small.empty:
